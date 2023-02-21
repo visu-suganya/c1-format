@@ -58,7 +58,12 @@ func main() {
 	isUpdateJson := flag.Bool("isUpdateJson", false, "")
 	flag.Parse()
 
+	if !fileExists(*packageName + "/branch-cover.json") {
+		return
+	}
+
 	currentContent, err := ioutil.ReadFile(*packageName + "/branch-cover.json")
+
 	if err != nil {
 		log.Fatal("Error when opening file: ", err)
 	}
@@ -222,4 +227,11 @@ func createDataForXmlfile(branchCoverageDataCoverage BranchCoverageDataCoverage)
 		lineToCoverElemList = append(lineToCoverElemList, lineToCoverElement)
 	}
 	return lineToCoverElemList
+}
+
+// fileExists checks if a file exists and is not a directory before we
+// try using it to prevent further errors.
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return !os.IsNotExist(err)
 }
