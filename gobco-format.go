@@ -63,6 +63,16 @@ func main() {
 	}
 
 	currentContent, err := ioutil.ReadFile(*packageName + "/branch-cover.json")
+	if len(currentContent) == 0 {
+		log.Printf("Empty content")
+		if *packageName == "./test-results" {
+			dataEmpty, _ := xml.MarshalIndent(&coverage{
+				Version: "1",
+				File:    []FileCoverage{}}, "", "\t")
+			ioutil.WriteFile("test-results/branch-coverage.xml", dataEmpty, 0644)
+		}
+		return
+	}
 
 	if err != nil {
 		log.Fatal("Error when opening file: ", err)
@@ -125,6 +135,7 @@ func main() {
 					filenamecover = fileName
 				}
 			}
+
 			xmlData := &coverage{
 				Version: "1",
 				File:    fileElementList}
