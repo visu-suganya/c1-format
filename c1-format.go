@@ -13,6 +13,23 @@ import (
 	"strings"
 )
 
+// Ruby's simplecov coveraage.json struct types list
+type Rspec struct {
+	Rspec RubyCoverage `json:"RSpec"`
+}
+type RubyCoverage struct {
+	Coverage  LineBranchMap `json:"coverage"`
+	Timestamp int64         `json:"timestamp"`
+}
+type LineBranchMap map[string]RubyLineBranch
+
+type RubyLineBranch struct {
+	Lines        []int64            `json:"lines"`
+	RubyBranches RubyBranchStartMap `json:"branches"`
+}
+type RubyBranchStartMap map[string]RubyBranchMap
+type RubyBranchMap map[string]int
+
 // struct to create generic branch coerage report for sonarqube
 type coverage struct {
 	Version string         `xml:"version,attr"`
@@ -31,14 +48,14 @@ type LineToCover struct {
 
 // struct for creation of all-branch-cover.json file to find full branch coverage rate
 type BranchCoverageData struct {
-	Start      string
-	Code       string
-	TrueCount  int
-	FalseCount int
+	Start      string `json:"Start"`
+	Code       string `json:"Code"`
+	TrueCount  int    `json:"TrueCount"`
+	FalseCount int    `json:"FalseCount"`
 }
 type BranchCoverageDataCoverage struct {
 	Filename        string                `json:"filename"`
-	Covered         int64                 `json:"covered"`
+	Covered         int                   `json:"covered"`
 	BranchesToCover int64                 `json:"total"`
 	CoverageRate    float64               `json:"coverageRate"`
 	CoverageData    []*BranchCoverageData `json:"coverageData"`
@@ -46,54 +63,62 @@ type BranchCoverageDataCoverage struct {
 type BranchCoverage struct {
 	CoverageRate       float64                      `json:"coverageRate"`
 	BranchesToCover    int64                        `json:"totalBranch"`
-	TotalCoveredBranch int64                        `json:"totalCoveredBranch"`
+	TotalCoveredBranch int                          `json:"totalCoveredBranch"`
 	AllData            []BranchCoverageDataCoverage `json:"allData"`
 }
 
+const EMPTY_CHECK = 0
+
 func main() {
 
-	// Get command line argument1
+	// Get command line arguments
 	packageName := flag.String("packageName", "", "")
-	// Get command line argument2
 	isUpdateJson := flag.Bool("isUpdateJson", false, "")
 	flag.Parse()
-
-	if !fileExists(*packageName + "/branch-cover.json") {
+	if !fileExists(*packageName+"/branch-cover.json") && *packageName != "c1-ruby" {
 		return
 	}
-
-	currentContent, err := ioutil.ReadFile(*packageName + "/branch-cover.json")
-	if len(currentContent) == 0 {
-		log.Printf("Empty content")
-		if *packageName == "./test-results" {
-			dataEmpty, _ := xml.MarshalIndent(&coverage{
-				Version: "1",
-				File:    []FileCoverage{}}, "", "\t")
-			ioutil.WriteFile("test-results/branch-coverage.xml", dataEmpty, 0644)
-		}
-		return
+	var currentContent []byte
+	var err error
+	if *packageName == "c1-ruby" {
+		currentContent, err = ioutil.ReadFile("coverage/.resultset.json")
+	} else {
+		currentContent, err = ioutil.ReadFile(*packageName + "/branch-cover.json")
 	}
-
 	if err != nil {
 		log.Fatal("Error when opening file: ", err)
 	}
 
-	// Now let's unmarshall the data into `currentContent`
+	if len(currentContent) == EMPTY_CHECK {
+		log.Printf("Empty content")
+		var filelemList []FileCoverage
+		if *packageName == "./test-results" {
+			createXmlFile(filelemList, "test-results")
+		} else if *packageName == "c1-ruby" {
+			createXmlFile(filelemList, "coverage")
+		}
+		return
+	}
+
 	var payloadCurrent []*BranchCoverageData
 	var newpayloadCurrent []*BranchCoverageData
 	var allDataCover []BranchCoverageDataCoverage
-	err = json.Unmarshal([]byte(currentContent), &payloadCurrent)
-	if err != nil {
-		log.Fatal("Error during Unmarshal() of currentContent: ", err)
-	}
 
 	if !(*isUpdateJson) {
 		var filenamecover string
 		var totalBranchInFile int64
-		var coveredBranchInFile int64
+		var coveredBranchInFile int
 		var totalBranch int64
-		var coveredBranch int64
+		var coveredBranch int
 		if *packageName == "./test-results" {
+
+			err = json.NewDecoder(strings.NewReader(string(currentContent[:]))).Decode(&payloadCurrent)
+			if err != nil {
+				log.Fatal("Error while reading .resultset.json file\n", err)
+			}
+			if err != nil {
+				log.Fatal("Error during Unmarshal() of currentContent: ", err)
+			}
 			// To generate xml file atlast
 			var fileElementList []FileCoverage
 
@@ -117,42 +142,28 @@ func main() {
 					fileElementList = append(fileElementList, fileElement)
 					totalBranch = totalBranch + totalBranchInFile
 					coveredBranch = coveredBranch + coveredBranchInFile
-					totalBranchInFile = 0
-					coveredBranchInFile = 0
+					totalBranchInFile = EMPTY_CHECK
+					coveredBranchInFile = EMPTY_CHECK
 					newpayloadCurrent = nil
 					filenamecover = fileName
 				}
 
 				newpayloadCurrent = append(newpayloadCurrent, payloadCurrent[i])
 				totalBranchInFile = totalBranchInFile + 2
-				if payloadCurrent[i].TrueCount > 0 {
+				if payloadCurrent[i].TrueCount > EMPTY_CHECK {
 					coveredBranchInFile++
 				}
-				if payloadCurrent[i].FalseCount > 0 {
+				if payloadCurrent[i].FalseCount > EMPTY_CHECK {
 					coveredBranchInFile++
 				}
-				if i == 0 {
+				if i == EMPTY_CHECK {
 					filenamecover = fileName
 				}
 			}
 
-			xmlData := &coverage{
-				Version: "1",
-				File:    fileElementList}
+			createXmlFile(fileElementList, "test-results")
 
-			xmlFile, err := os.Create("test-results/branch-coverage.xml")
-			enc := xml.NewEncoder(xmlFile)
-			enc.Indent("", "\t")
-			if err := enc.Encode(xmlData); err != nil {
-				fmt.Printf("error: %v\n", err)
-			}
-
-			if err != nil {
-				fmt.Println("Error creating XML file: ", err)
-				return
-			}
-
-			/* */
+			/* To print coverage rate from gobco output*/
 			var branchCoverage BranchCoverage
 			branchCoverage.AllData = allDataCover
 			branchCoverage.CoverageRate = getScore(totalBranch, coveredBranch)
@@ -160,13 +171,25 @@ func main() {
 			branchCoverage.TotalCoveredBranch = coveredBranch
 			jsonfileall, _ := json.Marshal(branchCoverage)
 			_ = ioutil.WriteFile("test-results/all-branch-cover.json", jsonfileall, 0644)
-			log.Println("Total Branches: ", totalBranch)
-			log.Println("Total Covered: ", coveredBranch)
-			log.Println("Coverage= ", getScore(totalBranch, coveredBranch))
+			// log.Println("Total Branches: ", totalBranch)
+			// log.Println("Total Covered: ", coveredBranch)
+			// log.Println("Coverage= ", getScore(totalBranch, coveredBranch))
 
-			fmt.Println("done writing to C1 as C0 data")
+		} else if *packageName == "c1-ruby" {
+			log.Println("C1 Coverage report for ruby")
+			var rspec Rspec
+			err = json.NewDecoder(strings.NewReader(string(currentContent[:]))).Decode(&rspec)
+			if err != nil {
+				log.Fatal("Error while reading .resultset.json file\n", err)
+			}
 
+			ParseJsonForRubyAndPrepareXmlData(rspec)
 		} else {
+
+			err = json.NewDecoder(strings.NewReader(string(currentContent[:]))).Decode(&payloadCurrent)
+			if err != nil {
+				log.Fatal("Error during Unmarshal() of currentContent for packagename update: ", err)
+			}
 			// To update package name of the files in gobco output json file(it only has filename without package)
 			for i := 0; i < len(payloadCurrent); i++ {
 				lineNumber := payloadCurrent[i].Start
@@ -176,23 +199,23 @@ func main() {
 
 				payloadCurrent[i].Start = *packageName + "/" + fileName + ":" + strconv.Itoa(lineNumberStartSplitted) + ":" + strconv.Itoa(ColNumberStartSplitted)
 			}
+			jsonfile, _ := json.Marshal(payloadCurrent)
+			_ = ioutil.WriteFile(*packageName+"/branch-cover.json", jsonfile, 0644)
 		}
-		jsonfile, _ := json.Marshal(payloadCurrent)
-		_ = ioutil.WriteFile(*packageName+"/branch-cover.json", jsonfile, 0644)
 	} else if *isUpdateJson {
 		// Copy branch-cover.json file from each package and write it in test-results folder
-		contentAll, err := ioutil.ReadFile("test-results/branch-cover.json")
+		contentAll, err := ioutil.ReadFile(*packageName + "/branch-cover.json")
+
 		if err != nil {
 			log.Fatal("Error when opening file: ", err)
 		}
 
 		if len(contentAll) > 0 {
 			var payloadAll []*BranchCoverageData
-			err = json.Unmarshal([]byte(contentAll), &payloadAll)
+			err = json.NewDecoder(strings.NewReader(string(contentAll[:]))).Decode(&payloadAll)
 			if err != nil {
 				log.Fatal("Error during Unmarshal() of contentAll: ", err)
 			}
-
 			payloadAll = append(payloadAll, payloadCurrent...)
 			jsonfile, _ := json.Marshal(payloadAll)
 			_ = ioutil.WriteFile("test-results/branch-cover.json", jsonfile, 0644)
@@ -206,7 +229,7 @@ func main() {
 }
 
 //Find branch coveage rate
-func getScore(total int64, covered int64) float64 {
+func getScore(total int64, covered int) float64 {
 	return math.Floor(float64(covered) / float64(total) * 100)
 }
 
@@ -217,10 +240,10 @@ func createDataForXmlfile(branchCoverageDataCoverage BranchCoverageDataCoverage)
 	for j := 0; j < len(branchCoverDataForaFile); j++ {
 		var coveredBranchXml = 0
 		var isCovered = true
-		if branchCoverageDataCoverage.CoverageData[j].TrueCount > 0 {
+		if branchCoverageDataCoverage.CoverageData[j].TrueCount > EMPTY_CHECK {
 			coveredBranchXml++
 		}
-		if branchCoverageDataCoverage.CoverageData[j].FalseCount > 0 {
+		if branchCoverageDataCoverage.CoverageData[j].FalseCount > EMPTY_CHECK {
 			coveredBranchXml++
 		}
 		if coveredBranchXml < 2 {
@@ -245,4 +268,89 @@ func createDataForXmlfile(branchCoverageDataCoverage BranchCoverageDataCoverage)
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return !os.IsNotExist(err)
+}
+
+func ParseJsonForRubyAndPrepareXmlData(rspec Rspec) {
+
+	keys := make([]string, 0, len(rspec.Rspec.Coverage))
+	for k := range rspec.Rspec.Coverage {
+		keys = append(keys, k)
+	}
+
+	var fileElementList []FileCoverage
+	// To generate xml file atlast
+	for i := 0; i < len(keys); i++ {
+		var lineToCoverElemList []LineToCover
+		fileName := keys[i]
+
+		rubyBranchMap := rspec.Rspec.Coverage[fileName].RubyBranches
+		branchKeys := make([]string, 0, len(rubyBranchMap))
+
+		for c1 := range rubyBranchMap {
+			branchKeys = append(branchKeys, c1)
+		}
+
+		for k := 0; k < len(branchKeys); k++ {
+			outetKey := branchKeys[k]
+			newKey := strings.Replace(strings.Replace(outetKey, "[", "", -1), "]", "", -1)
+			branchKeyArray := strings.Split(newKey, ",")
+
+			branchMap := rubyBranchMap[outetKey]
+			ifelseKeys := make([]string, 0, len(branchMap))
+			for k1 := range branchMap {
+				ifelseKeys = append(ifelseKeys, k1)
+			}
+			notCovered := 0
+			for branchCount := 0; branchCount < len(ifelseKeys); branchCount++ {
+				if branchMap[ifelseKeys[branchCount]] == EMPTY_CHECK {
+					notCovered++
+				}
+			}
+
+			lineToCoverElement := prepareLineElement(branchKeyArray[2], strconv.Itoa(len(ifelseKeys)), strconv.Itoa(len(ifelseKeys)-notCovered),
+				(len(ifelseKeys)-notCovered) == len(ifelseKeys))
+
+			lineToCoverElemList = append(lineToCoverElemList, lineToCoverElement)
+		}
+		if len(lineToCoverElemList) > 0 {
+			fileElement := FileCoverage{
+				Path:        fileName,
+				LineToCover: lineToCoverElemList,
+			}
+			fileElementList = append(fileElementList, fileElement)
+		}
+
+	}
+
+	createXmlFile(fileElementList, "coverage")
+
+}
+
+// Preare LineTocover element
+func prepareLineElement(filename string, total string, covered string, isCovered bool) LineToCover {
+	lineToCoverElement := LineToCover{
+		LineNumber:      strings.Trim(filename, " "),
+		BranchesToCover: total,
+		CoveredBranches: covered,
+		Covered:         fmt.Sprint(isCovered),
+	}
+	return lineToCoverElement
+}
+
+// Pass data and create generic test coverage report for sonaqube
+func createXmlFile(fileElementList []FileCoverage, folderPath string) {
+	xmlData := coverage{
+		Version: "1",
+		File:    fileElementList}
+	xmlFile, err := os.Create(folderPath + "/branch-coverage.xml")
+	enc := xml.NewEncoder(xmlFile)
+	enc.Indent("", "\t")
+	if err := enc.Encode(xmlData); err != nil {
+		fmt.Printf("error: %v\n", err)
+	}
+
+	if err != nil {
+		fmt.Println("Error creating XML file: ", err)
+		return
+	}
 }
