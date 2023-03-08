@@ -251,12 +251,7 @@ func createDataForXmlfile(branchCoverageDataCoverage BranchCoverageDataCoverage)
 		}
 		codeStart := branchCoverageDataCoverage.CoverageData[j].Start
 		lineNumber := strings.Split(codeStart, ":")[1]
-		lineToCoverElement := LineToCover{
-			LineNumber:      lineNumber,
-			Covered:         fmt.Sprint(isCovered),
-			BranchesToCover: "2",
-			CoveredBranches: fmt.Sprint(coveredBranchXml),
-		}
+		lineToCoverElement := prepareLineElement(lineNumber, "2", fmt.Sprint(coveredBranchXml), isCovered)
 
 		lineToCoverElemList = append(lineToCoverElemList, lineToCoverElement)
 	}
@@ -310,7 +305,16 @@ func ParseJsonForRubyAndPrepareXmlData(rspec Rspec) {
 			lineToCoverElement := prepareLineElement(branchKeyArray[2], strconv.Itoa(len(ifelseKeys)), strconv.Itoa(len(ifelseKeys)-notCovered),
 				(len(ifelseKeys)-notCovered) == len(ifelseKeys))
 
-			lineToCoverElemList = append(lineToCoverElemList, lineToCoverElement)
+			linePresentAt := checkIfLineAlreadyPresent(lineToCoverElement.LineNumber, lineToCoverElemList)
+			if linePresentAt != -1 {
+				lineElementTarget := lineToCoverElemList[linePresentAt]
+				lineElementTarget.BranchesToCover = fmt.Sprint(parseAndGetInt(lineElementTarget.BranchesToCover) + parseAndGetInt(lineToCoverElement.BranchesToCover))
+				lineElementTarget.CoveredBranches = fmt.Sprint(parseAndGetInt(lineElementTarget.CoveredBranches) + parseAndGetInt(lineToCoverElement.CoveredBranches))
+				lineElementTarget.Covered = fmt.Sprint(parseAndGetBool(lineElementTarget.CoveredBranches) && parseAndGetBool(lineToCoverElement.CoveredBranches))
+				lineToCoverElemList[linePresentAt] = lineElementTarget
+			} else {
+				lineToCoverElemList = append(lineToCoverElemList, lineToCoverElement)
+			}
 		}
 		if len(lineToCoverElemList) > 0 {
 			fileElement := FileCoverage{
@@ -324,6 +328,24 @@ func ParseJsonForRubyAndPrepareXmlData(rspec Rspec) {
 
 	createXmlFile(fileElementList, "coverage")
 
+}
+
+func parseAndGetBool(iscovered string) bool {
+	val, err := strconv.ParseBool(iscovered)
+	if err == nil {
+		return val
+	} else {
+		return false
+	}
+}
+
+func parseAndGetInt(iscovered string) int {
+	val, err := strconv.Atoi(iscovered)
+	if err == nil {
+		return val
+	} else {
+		return -1
+	}
 }
 
 // Preare LineTocover element
@@ -353,4 +375,13 @@ func createXmlFile(fileElementList []FileCoverage, folderPath string) {
 		fmt.Println("Error creating XML file: ", err)
 		return
 	}
+}
+
+func checkIfLineAlreadyPresent(lineNumber string, lineToCoverElemList []LineToCover) int {
+	for count := 0; count < len(lineToCoverElemList); count++ {
+		if lineToCoverElemList[count].LineNumber == lineNumber {
+			return count
+		}
+	}
+	return -1
 }
